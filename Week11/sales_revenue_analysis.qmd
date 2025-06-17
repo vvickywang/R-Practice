@@ -1,0 +1,195 @@
+---
+title: "Sales Revenue Analysis"
+author: "David Gabauer"
+format: 
+  html: default
+  pdf: default
+editor: visual
+---
+
+## Load Required Libraries
+
+```{r}
+#| label: load-packages
+#| message: false
+#| warning: false
+#| echo: true
+
+library("gt")
+library("readxl")
+library("writexl")
+library("lubridate")
+library("tidyverse")
+```
+
+# Data
+
+## Load Dataset {.smaller}
+
+Load `sales.xlsx` and check for potential data quality issues and correct variable types. Each row is uniquely identified by the combination of `customer_id`, `invoice_no`, and `stock_code`. More intuitively, each row represents one item purchased by a customer on a specific invoice.
+
+```{r}
+data = read_xlsx("../data/sales.xlsx")
+str(data)
+```
+
+## Data Cleaning {.smaller}
+
+The data appears free of major quality issues. However, the `quantity` variable is of type character and should be converted to numeric.
+
+```{r}
+sales = data |>
+  mutate(quantity=parse_number(quantity))
+str(sales)
+```
+
+## Compute Revenue at the Item-Invoice Level {.smaller}
+
+We now compute the revenue for each item purchased, based on invoice and customer combinations. @tbl-dataset-overview shows the first five observations of the sales dataset.
+
+```{r}
+#| label: tbl-dataset-overview
+#| tbl-cap: First five rows of the sales dataset
+sales = sales |>
+  tibble() |>
+  mutate(revenue=unit_price*quantity) 
+
+sales |>
+  slice(1:5) |>
+  gt()
+```
+
+# Analysis
+
+## Sales Revenue by Country {.smaller}
+
+@tbl-top-countries shows the top 5 countries by sales revenue. The United Kingdom alone accounts for over 75% of total revenue.
+
+```{r}
+#| label: tbl-top-countries
+#| tbl-cap: Top 5 countries per sales revenue
+sales_country = sales |>
+  group_by(country) |>
+  summarize(sales = sum(revenue, na.rm = TRUE)) |>
+  mutate(percentage = sales / sum(sales) * 100) |>
+  arrange(desc(percentage)) |>
+  slice(1:5)
+
+sales_country |> 
+  gt()
+```
+
+@fig-sales_country shows the percentage share of the top 5 countries by total sales revenue.
+
+```{r}
+#| label: fig-sales_country
+#| fig-height: 7
+#| fig-asp: 0.45
+#| fig-cap: Bar chart showing the percentage of overall revenue by country
+ggplot(sales_country, aes(x=reorder(country, percentage, decreasing=TRUE), y=percentage)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Top 5 Countries by Sales",
+    x = "Country",
+    y = "Total Sales"
+    ) 
+```
+
+## Function {.smaller}
+
+The function below calculates daily revenue for a selected country.
+
+```{r}
+#| label: create a function
+country_daily_revenues = function(data, selected_country='United Kingdom') {
+  data$days = as.character(data$days)
+  data |>
+    filter(country==selected_country) |>
+    select(country, year, month, days, revenue) |>
+    group_by(days) |>
+    summarize(daily_revenue=sum(revenue)) |>
+    mutate(days=parse_number(days)) |>
+    arrange(days)
+}
+```
+
+## Daily Revenue in the United Kingdom {.smaller}
+
+@tbl-uk-daily-revenues illustrates daily revenue generated in the United Kingdom during January.
+
+```{r}
+#| label: tbl-uk-daily-revenues
+#| tbl-cap: Daily revenues in the United Kingdom
+country_daily_revenues(sales, selected_country="United Kingdom") |> 
+  slice(1:5) |>
+  gt()
+```
+
+```{r}
+sales_uk = country_daily_revenues(sales, selected_country='United Kingdom')
+
+ggplot(sales_uk, aes(x = days, y=daily_revenue)) +
+  geom_line(color = "steelblue") +
+  labs(
+    title = "Daily Revenues Over Days",
+    x = "Day of the Year",
+    y = "Daily Revenue"
+  )
+```
+
+## Very Important Customer {.smaller}
+
+@tbl-best-customer lists the customers who generated the highest total revenue.
+
+```{r}
+#| label: tbl-best-customer
+#| tbl-cap: Revenues by customers
+sales |>
+  select(country, customer_id, revenue) |>
+  filter(!is.na(customer_id)) |>
+  group_by(customer_id) |>
+  summarize(revenue_per_customer=sum(revenue, na.rm=TRUE)) |>
+  arrange(desc(revenue_per_customer)) |>
+  slice(1:5) |> 
+  gt()
+```
+
+## Top Revenue-Generating Invoice {.smaller}
+
+A team member suggested that the customer associated with the invoice generating the highest revenue should receive a promotional gift. This prompted the following analysis.
+
+@tbl-best-invoice shows that the invoice with the highest revenue exceeds the total monthly revenue of the top customer. Your supervisor argued this is not possible and asked for further investigation.
+
+```{r}
+#| label: tbl-best-invoice
+#| tbl-cap: Revenue by invoice number
+sales |>
+  select(country, invoice_no, revenue) |>
+  filter(!is.na(invoice_no)) |>
+  group_by(invoice_no) |>
+  summarize(revenue_per_customer=sum(revenue, na.rm=TRUE)) |>
+  arrange(desc(revenue_per_customer)) |>
+  slice(1:5) |> 
+  gt()
+```
+
+## Customer of Top Revenue Generating Invoice {.smaller}
+
+Therefore, you need to identify which customer is linked to the highest invoice.
+
+```{r}
+sales |>
+  filter(invoice_no=="541431") |>
+  select(country, customer_id, invoice_no, revenue) |>
+  slice(1:5) |>
+  gt()
+```
+
+Next, you examine the invoice history of the customer. It turns out the customer returned the item. Consequently, you recommend selecting the customer with the highest monthly revenue for the promotion.
+
+```{r}
+sales |>
+  filter(customer_id=="12346") |>
+  select(country, customer_id, invoice_no, revenue) |>
+  gt()
+```
